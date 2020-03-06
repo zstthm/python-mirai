@@ -18,7 +18,7 @@ from mirai.event.message.components import (
 from mirai.event.message.chain import (
     MessageChain
 )
-from mirai.event.message.types import (
+from mirai.event.message.models import (
     GroupMessage,
     FriendMessage,
     BotMessage
@@ -79,3 +79,5 @@ import mirai.protocol
 from mirai.session import (
     Session
 )
+
+from mirai.application import Mirai

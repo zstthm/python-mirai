@@ -1,69 +1,54 @@
+from urllib import parse
+from typing import Union, List, Dict, Optional, Callable, Any, Awaitable, NamedTuple
+import typing as T
 import asyncio
-import contextlib
+from functools import partial
 import copy
 import inspect
-import json
-import random
-import traceback
-import typing as T
-from contextvars import ContextVar
-from functools import partial
-from threading import Lock, Thread
-from urllib import parse
 
-from mirai.misc import printer, raiser
+from mirai.misc import raiser
 
-from .depend import Depend
-from .event import ExternalEvent, ExternalEventTypes, InternalEvent
-from .event.external.enums import ExternalEvents
-from .event.message import components
-from .event.message.models import (
+from mirai.event.builtins import UnexpectedException
+from mirai.depend import Depend
+from mirai.event import ExternalEvent, ExternalEventTypes, InternalEvent
+from mirai.event.external.enums import ExternalEvents
+from mirai.event.message import components
+from mirai.event.message.models import (
     FriendMessage, GroupMessage, MessageItemType, MessageTypes)
-from .friend import Friend
-from .group import Group, Member
-from .logger import Event as EventLogger
-from .logger import Session as SessionLogger
-from .network import fetch, session
-from .protocol import MiraiProtocol
+from mirai.friend import Friend
+from mirai.group import Group, Member
+from mirai.logger import Event as EventLogger
+from mirai.logger import Session as SessionLogger
+from mirai.network import fetch, session
+from mirai.protocol import MiraiProtocol
+from mirai.event.message import MessageChain
+import traceback
 
-class Session(MiraiProtocol):
-  cache_options: T.Dict[str, bool] = {}
-
-  cached_groups: T.Dict[int, Group] = {}
-  cached_friends: T.Dict[int, Friend] = {}
-
-  enabled: bool = False
-
-  event_stacks: asyncio.Queue
-  event = {}
-
-  async_runtime: Thread = None
-  another_loop: asyncio.AbstractEventLoop
-  exit_signal: bool = False
+class Mirai(MiraiProtocol):
+  event: Dict[
+    str, List[Callable[[Any], Awaitable]]
+  ] = {}
+  run_forever_target: List[Callable] = []
 
   def __init__(self, 
-    url: T.Optional[str] = None, # 
+    url: T.Optional[str] = None,
 
     host: T.Optional[str] = None,
     port: T.Optional[int] = None,
     authKey: T.Optional[str] = None,
-    qq: T.Optional[int] = None,
-
-    cache_groups: T.Optional[bool] = True,
-    cache_friends: T.Optional[bool] = True
+    qq: T.Optional[int] = None
   ):
     if url:
       urlinfo = parse.urlparse(url)
       if urlinfo:
         query_info = parse.parse_qs(urlinfo.query)
-        if all((
+        if all([
           urlinfo.scheme == "mirai",
           urlinfo.path == "/",
 
           "authKey" in query_info and query_info["authKey"],
           "qq" in query_info and query_info["qq"]
-        )):
-          # 确认过了, 无问题
+        ]):
           authKey = query_info["authKey"][0]
 
           self.baseurl = f"http://{urlinfo.netloc}"
@@ -81,19 +66,11 @@ class Session(MiraiProtocol):
       else:
         raise ValueError("invaild arguments")
 
-    self.cache_options['groups'] = cache_groups
-    self.cache_options['friends'] = cache_friends
-
-    self.shared_lock = Lock()
-    self.another_loop = asyncio.new_event_loop()
-    self.event_stacks = asyncio.Queue(loop=self.another_loop)
-
   async def enable_session(self) -> "Session":
     auth_response = await super().auth()
     if all([
       "code" in auth_response and auth_response['code'] == 0,
-      "session" in auth_response and auth_response['session'] or\
-        "msg" in auth_response and auth_response['msg'] # polyfill
+      "session" in auth_response and auth_response['session']
     ]):
       if "msg" in auth_response and auth_response['msg']:
         self.session_key = auth_response['msg']
@@ -106,90 +83,11 @@ class Session(MiraiProtocol):
         raise ValueError("invaild authKey")
       else:
         raise ValueError('invaild args: unknown response')
-    
-    if self.cache_options['groups']:
-      await self.cacheBotGroups()
-    if self.cache_options['friends']:
-      await self.cacheBotFriends()
 
     self.enabled = True
     return self
 
-  @classmethod
-  async def start(cls,
-    url: T.Optional[str] = None,
-
-    host: T.Optional[str] = None,
-    port: T.Optional[int] = None,
-    authKey: T.Optional[str] = None,
-    qq: T.Optional[int] = None,
-
-    cache_groups: T.Optional[bool] = True,
-    cache_friends: T.Optional[bool] = True
-  ):
-    self = cls(url, host, port, authKey, qq, cache_groups, cache_friends)
-    return await self.enable_session()
-
-  def setting_event_runtime(self):
-    def inline_warpper(loop: asyncio.AbstractEventLoop):
-      asyncio.set_event_loop(loop)
-      loop.create_task(self.get_tasks())
-      loop.run_forever()
-    self.async_runtime = Thread(target=inline_warpper, args=(self.another_loop,), daemon=True)
-
-  def start_event_runtime(self):
-    self.async_runtime.start()
-
-  async def __aenter__(self) -> "Session":
-    await self.enable_session()
-    self.setting_event_runtime()
-    self.start_event_runtime()
-    return self
-
-  async def __aexit__(self, exc_type, exc, tb):
-    await self.close_session(ignoreError=True)
-    await session.close()
-
-  async def get_tasks(self):
-    "用于为外部的事件循环注入 event_runner 和 message_polling"
-    with self.shared_lock:
-      await asyncio.wait([
-        self.event_runner(lambda: self.exit_signal, self.event_stacks),
-        self.message_polling(lambda: self.exit_signal, self.event_stacks)
-      ])
-
-  async def message_polling(self, exit_signal_status, queue, count=10):
-    while not exit_signal_status():
-      await asyncio.sleep(0.5)
-
-      result: T.List[T.Union[FriendMessage, GroupMessage, ExternalEvent]] = \
-        await super().fetchMessage(count)
-      last_length = len(result)
-      latest_result = []
-      while True:
-        if last_length == count:
-          latest_result = await super().fetchMessage(count)
-          last_length = len(latest_result)
-          result += latest_result
-          continue
-        break
-      
-      # 开始处理
-
-      # @event.receiver("GroupMessage", lambda info: info.......)
-      for message_index in range(len(result)):
-        item = result[message_index]
-        await queue.put(
-          InternalEvent(
-            name=self.getEventCurrentName(type(item)),
-            body=item
-          )
-        )
-
-  def receiver(self, event_name, 
-      addon_condition: T.Optional[
-        T.Callable[[T.Union[FriendMessage, GroupMessage]], bool]
-      ] = None,
+  def receiver(self, event_name,
       dependencies: T.List[Depend] = [],
       use_middlewares: T.List[T.Callable] = []
     ):
@@ -199,11 +97,11 @@ class Session(MiraiProtocol):
       if not inspect.iscoroutinefunction(func):
         raise TypeError("event body must be a coroutine function.")
 
-      protocol = {addon_condition: {
+      protocol = {
         "func": func,
         "dependencies": dependencies,
         "middlewares": use_middlewares
-      }}  
+      }
       
       if event_name not in self.event:
         self.event[event_name] = [protocol]
@@ -213,7 +111,6 @@ class Session(MiraiProtocol):
     return receiver_warpper
 
   async def throw_exception_event(self, event_context, queue, exception):
-    from .event.builtins import UnexpectedException
     if event_context.name != "UnexpectedException":
       #print("error: by pre:", event_context.name)
       await queue.put(InternalEvent(
@@ -269,19 +166,28 @@ class Session(MiraiProtocol):
     if isinstance(run_body, dict):
       callable_target = run_body['func']
       for depend in run_body['dependencies']:
+        if not inspect.isclass(depend.func):
+          depend_func = depend.func
+        elif hasattr(depend.func, "__call__"):
+          depend_func = depend.func.__call__
+        else:
+          raise TypeError("must be callable.")
+
         await self.main_entrance(
           {
-            "func": depend.func if not inspect.isclass(depend.func) else\
-              depend.func.__call__ if hasattr(depend.func, "__call__") else\
-                raiser(TypeError("must be callable.")), 
-              "middlewares": depend.middlewares
+            "func": depend_func,
+            "middlewares": depend.middlewares
           },
           event_context, queue
         )
     else:
-      callable_target = run_body if not inspect.isclass(run_body) else\
-        run_body.__call__ if hasattr(run_body, "__call__") else\
-          raiser(TypeError("must be callable."))
+      if inspect.isclass(run_body):
+        if hasattr(run_body, "__call__"):
+          run_body = run_body.__call__
+        else:
+          raise TypeError("must be callable.")
+      else:
+        callable_target = run_body
 
     translated_mapping = {
       **(await self.argument_compiler(
@@ -321,26 +227,58 @@ class Session(MiraiProtocol):
             for async_middleware in async_middlewares:
               SessionLogger.debug(f"a event called {event_context.name}, enter a currect async context.")
               await async_stack.enter_async_context(async_middleware)
+
             with contextlib.ExitStack() as normal_stack:
               for normal_middleware in normal_middlewares:
                 SessionLogger.debug(f"a event called {event_context.name}, enter a currect context.")
                 normal_stack.enter_context(normal_middleware)
+
               if inspect.iscoroutinefunction(callable_target):
                 return await callable_target(**translated_mapping)
               else:
                 return callable_target(**translated_mapping)
-
-      if inspect.iscoroutinefunction(callable_target):
-        return await callable_target(**translated_mapping)
+        else:
+          if inspect.iscoroutinefunction(callable_target):
+            return await callable_target(**translated_mapping)
+          else:
+            return callable_target(**translated_mapping)
       else:
-        return callable_target(**translated_mapping)
+        if inspect.iscoroutinefunction(callable_target):
+          return await callable_target(**translated_mapping)
+        else:
+          return callable_target(**translated_mapping)
     except (NameError, TypeError) as e:
       EventLogger.error(f"threw a exception by {event_context.name}, it's about Annotations Checker, please report to developer.")
       traceback.print_exc()
     except Exception as e:
       EventLogger.error(f"threw a exception by {event_context.name}, and it's {e}")
       await self.throw_exception_event(event_context, queue, e)
-      
+
+  async def message_polling(self, exit_signal, queue, count=10):
+    while not exit_signal():
+      await asyncio.sleep(0.5)
+
+      result  = \
+        await super().fetchMessage(count)
+      last_length = len(result)
+      latest_result = []
+      while True:
+        if last_length == count:
+          latest_result = await super().fetchMessage(count)
+          last_length = len(latest_result)
+          result += latest_result
+          continue
+        break
+
+      for message_index in range(len(result)):
+        item = result[message_index]
+        await queue.put(
+          InternalEvent(
+            name=self.getEventCurrentName(type(item)),
+            body=item
+          )
+        )
+  
   async def event_runner(self, exit_signal_status, queue: asyncio.Queue):
     while not exit_signal_status():
       event_context: InternalEvent
@@ -353,53 +291,21 @@ class Session(MiraiProtocol):
           continue
 
       if event_context.name in self.registeredEventNames:
-        for event in list(self.event.values())\
+        for event_body in list(self.event.values())\
               [self.registeredEventNames.index(event_context.name)]:
-          if event: # 判断是否是 []/{}
-            for pre_condition, run_body in event.items():
-              try:
-                condition_result = (not pre_condition) or (pre_condition(event_context.body))
-              except Exception as e:
-                self.throw_exception_event(event_context, queue, e)
-                continue
-              if condition_result:
-                EventLogger.info(f"handling a event: {event_context.name}")
+          if event_body:
+            EventLogger.info(f"handling a event: {event_context.name}, on {event_body}")
 
-                asyncio.create_task(self.main_entrance(
-                  run_body,
-                  event_context, queue
-                ))
-
-  async def close_session(self, ignoreError=False):
-    if self.enabled:
-      self.exit_signal = True
-      while self.shared_lock.locked():
-        pass
-      else:
-        self.another_loop.call_soon_threadsafe(self.another_loop.stop)
-        self.async_runtime.join()
-      await super().release()
-      self.enabled = False
-    else:
-      if not ignoreError:
-        raise ConnectionAbortedError("session closed.")
-
-  async def stop_event_runtime(self):
-    if not self.async_runtime:
-      raise ConnectionError("runtime stoped.")
-    self.exit_signal = True
-    while self.shared_lock.locked():
-      pass
-    else:
-      self.another_loop.call_soon_threadsafe(self.another_loop.stop)
-      self.async_runtime.join()
-
+            asyncio.create_task(self.main_entrance(
+              event_body,
+              event_context, queue
+            ))
+  
   def getRestraintMapping(self):
-    from .event.message import MessageChain
     def warpper(name, event_context):
       return name == event_context.name
     return {
-      Session: lambda k: True,
+      Mirai: lambda k: True,
       GroupMessage: lambda k: k.name == "GroupMessage",
       FriendMessage: lambda k: k.name =="FriendMessage",
       MessageChain: lambda k: k.name in MessageTypes,
@@ -454,15 +360,6 @@ class Session(MiraiProtocol):
           if type(depend) != Depend:
             raise TypeError(f"error in dependencies checker: {value['func']}: {event_name}")
 
-  async def joinMainThread(self):
-    self.checkEventDependencies()
-    self.checkEventBodyAnnotations()
-    SessionLogger.info("session ready.")
-    while self.shared_lock:
-      await asyncio.sleep(0.1)
-    else:
-      return
-
   def exception_handler(self, exception_class=None, addon_condition=None):
     return self.receiver("UnexpectedException",
       lambda context: True \
@@ -484,9 +381,8 @@ class Session(MiraiProtocol):
     return result
 
   def get_annotations_mapping(self):
-    from .event.message import MessageChain
     return {
-      Session: lambda k: self,
+      Mirai: lambda k: self,
       GroupMessage: lambda k: k.body \
         if k.name == "GroupMessage" else\
           raiser(ValueError("you cannot setting a unbind argument.")),
@@ -515,28 +411,6 @@ class Session(MiraiProtocol):
       **self.gen_event_anno()
     }
 
-  async def refreshBotGroupsCache(self) -> T.Dict[int, Group]:
-    self.cached_groups = {group.id: group for group in await super().groupList()}
-    return self.cached_groups
-  
-  async def refreshBotFriendsCache(self) -> T.Dict[int, Friend]:
-    self.cached_friends = {friend.id: friend for friend in await super().friendList()}
-    return self.cached_friends
-
-  async def cacheBotGroups(self):
-    if not self.cache_options['groups']:
-      self.cached_groups = {group.id: group for group in await super().groupList()}
-
-  async def cacheBotFriends(self):
-    if not self.cache_options['friends']:
-      self.cached_friends = {friend.id: friend for friend in await super().friendList()}
-
-  def getGroup(self, target: int) -> T.Optional[Group]:
-    return self.cached_groups.get(target)
-  
-  def getFriend(self, target: int) -> T.Optional[Friend]:
-    return self.cached_friends.get(target)
-
   def getEventCurrentName(self, event_value):
     from .event.builtins import UnexpectedException
     if inspect.isclass(event_value) and issubclass(event_value, ExternalEvent): # subclass
@@ -563,3 +437,24 @@ class Session(MiraiProtocol):
   @property
   def registeredEventNames(self):
     return [self.getEventCurrentName(i) for i in self.event.keys()]
+
+  def addForeverTarget(self, func: Callable[["Mirai"], Any]):
+    self.run_forever_target.append(func)
+
+  def run(self, loop=None):
+    loop = loop or asyncio.get_event_loop()
+    queue = asyncio.Queue(loop=loop)
+    exit_signal = False
+    loop.run_until_complete(self.enable_session())
+    loop.create_task(self.message_polling(lambda: exit_signal, queue))
+    loop.create_task(self.event_runner(lambda: exit_signal, queue))
+    for i in self.run_forever_target:
+      loop.create_task(i(self))
+
+    try:
+      loop.run_forever()
+    except KeyboardInterrupt:
+      SessionLogger.info("catched Ctrl-C, exiting..")
+    finally:
+      loop.run_until_complete(self.release())
+      loop.run_until_complete(session.close())
