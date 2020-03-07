@@ -151,6 +151,8 @@ class Mirai(MiraiProtocol):
     for i in signature_mapping.values():
       if not isinstance(i, Depend):
         raise TypeError("you must use a Depend to patch the default value.")
+      else:
+        return signature_mapping
 
   async def signature_checkout(self, func, event_context, queue):
     signature_mapping = self.signature_getter(func)
@@ -325,7 +327,7 @@ class Mirai(MiraiProtocol):
   def checkEventBodyAnnotations(self):
     event_bodys: T.Dict[T.Callable, T.List[str]] = {}
     for event_name in self.event:
-      event_body_list = sum([list(i.values()) for i in self.event[event_name]], [])
+      event_body_list = self.event[event_name]
       for i in event_body_list:
         if not event_bodys.get(i['func']):
           event_bodys[i['func']] = [event_name]
@@ -352,23 +354,82 @@ class Mirai(MiraiProtocol):
             except ValueError:
               raise
 
+  def getFuncRegisteredEvents(self, callable_target: T.Callable):
+    event_bodys: T.Dict[T.Callable, T.List[str]] = {}
+    for event_name in self.event:
+      event_body_list = sum([list(i.values()) for i in self.event[event_name]], [])
+      for i in event_body_list:
+        if not event_bodys.get(i['func']):
+          event_bodys[i['func']] = [event_name]
+        else:
+          event_bodys[i['func']].append(event_name)
+    return event_bodys.get(callable_target)
+
+  def checkFuncAnnotations(self, callable_target: T.Callable):
+    restraint_mapping = self.getRestraintMapping()
+    whileList = self.signature_getter(callable_target)
+    registered_events = self.getFuncRegisteredEvents(callable_target)
+    for param_name, func_item in callable_target.__annotations__.items():
+      if param_name not in whileList:
+        if not registered_events:
+          raise ValueError(f"error in annotations checker: {callable_target} is invaild.")
+        for event_name in registered_events:
+          try:
+            if not (restraint_mapping[func_item](
+                type("checkMockType", (object,), {
+                  "name": event_name
+                })
+              )
+            ):
+              raise ValueError(f"error in annotations checker: {callable_target}.{func_item}: {event_name}")
+          except KeyError:
+            raise ValueError(f"error in annotations checker: {callable_target}.{func_item} is invaild.")
+          except ValueError:
+            raise
+
+  def checkDependencies(self, depend_target: Depend):
+    signature_mapping = self.signature_checker(depend_target.func)
+    for k, v in signature_mapping.items():
+      if type(v) == Depend:
+        self.checkEventBodyAnnotations(v)
+        self.checkDependencies(v)
+
   def checkEventDependencies(self):
     for event_name, event_bodys in self.event.items():
       for i in event_bodys:
-        value = list(i.values())[0]
-        for depend in value['dependencies']:
+        for depend in i['dependencies']:
           if type(depend) != Depend:
-            raise TypeError(f"error in dependencies checker: {value['func']}: {event_name}")
+            raise TypeError(f"error in dependencies checker: {i['func']}: {event_name}")
+          else:
+            self.checkDependencies(depend)
 
-  def exception_handler(self, exception_class=None, addon_condition=None):
-    return self.receiver("UnexpectedException",
-      lambda context: True \
-        if not exception_class else \
-          type(context.error) == exception_class and (
-            addon_condition(context) \
-              if addon_condition else True
-          )
-    )
+  def exception_handler(self, exception_class=None):
+    def receiver_warpper(
+      func: T.Callable[[T.Union[FriendMessage, GroupMessage], "Session"], T.Awaitable[T.Any]]
+    ):
+      event_name = "UnexpectedException"
+
+      if not inspect.iscoroutinefunction(func):
+        raise TypeError("event body must be a coroutine function.")
+    
+      async def func_warpper_inout(context: UnexpectedException, *args, **kwargs):
+        if type(context.error) == exception_class:
+          return await func(context, *args, **kwargs)
+
+      func_warpper_inout.__annotations__ = func.__annotations__
+
+      protocol = {
+        "func": func_warpper_inout,
+        "dependencies": [],
+        "middlewares": []
+      }
+      
+      if event_name not in self.event:
+        self.event[event_name] = [protocol]
+      else:
+        self.event[event_name].append(protocol)
+      return func
+    return receiver_warpper
 
   def gen_event_anno(self):
     result = {}
@@ -442,6 +503,9 @@ class Mirai(MiraiProtocol):
     self.run_forever_target.append(func)
 
   def run(self, loop=None):
+    self.checkEventBodyAnnotations()
+    self.checkEventDependencies()
+
     loop = loop or asyncio.get_event_loop()
     queue = asyncio.Queue(loop=loop)
     exit_signal = False
