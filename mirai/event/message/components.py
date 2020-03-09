@@ -75,10 +75,10 @@ class AtAll(BaseMessageComponent):
 class Face(BaseMessageComponent):
     type: MessageComponentTypes = "Face"
     faceId: int
-    name: str
+    name: T.Optional[str]
 
-    def __init__(self, faceId, type="Face"):
-        super().__init__(faceId=faceId, type=type)
+    def __init__(self, faceId, name=None, type="Face"):
+        super().__init__(faceId=faceId, name=name, type=type)
 
     def toString(self):
         return f"[Face::name={self.name}]"
