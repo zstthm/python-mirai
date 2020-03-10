@@ -161,8 +161,7 @@ class Mirai(MiraiProtocol):
     for i in signature_mapping.values():
       if not isinstance(i, Depend):
         raise TypeError("you must use a Depend to patch the default value.")
-      else:
-        return signature_mapping
+    return signature_mapping
 
   async def signature_checkout(self, func, event_context, queue):
     signature_mapping = self.signature_getter(func)
@@ -188,7 +187,8 @@ class Mirai(MiraiProtocol):
         await self.main_entrance(
           {
             "func": depend_func,
-            "middlewares": depend.middlewares
+            "middlewares": depend.middlewares,
+            "dependencies": []
           },
           event_context, queue
         )
@@ -292,18 +292,23 @@ class Mirai(MiraiProtocol):
         )
 
   async def ws_event_receiver(self, exit_signal, queue):
+    await self.checkWebsocket()
     async with aiohttp.ClientSession() as session:
       async with session.ws_connect(
         f"{self.baseurl}/all?sessionKey={self.session_key}"
       ) as ws_connection:
         while not exit_signal():
-          print("?")
-          received_data = await ws_connection.receive_json()
-          print(received_data)
+          try:
+            received_data = await ws_connection.receive_json()
+          except TypeError:
+            if not exit_signal():
+              continue
+            else:
+              break
           if received_data:
             if received_data['type'] in MessageTypes:
                 if 'messageChain' in received_data: 
-                    received_data['messageChain'] = MessageChain.parse_obj(received_data['messageChain'])
+                  received_data['messageChain'] = MessageChain.parse_obj(received_data['messageChain'])
 
                 received_data = \
                     MessageTypes[received_data['type']].parse_obj(received_data)
@@ -332,7 +337,7 @@ class Mirai(MiraiProtocol):
         for event_body in list(self.event.values())\
               [self.registeredEventNames.index(event_context.name)]:
           if event_body:
-            EventLogger.info(f"handling a event: {event_context.name}, on {event_body}")
+            EventLogger.info(f"handling a event: {event_context.name}")
 
             asyncio.create_task(self.main_entrance(
               event_body,
@@ -427,7 +432,7 @@ class Mirai(MiraiProtocol):
     signature_mapping = self.signature_checker(depend_target.func)
     for k, v in signature_mapping.items():
       if type(v) == Depend:
-        self.checkEventBodyAnnotations(v)
+        self.checkEventBodyAnnotations()
         self.checkDependencies(v)
 
   def checkEventDependencies(self):
@@ -538,6 +543,16 @@ class Mirai(MiraiProtocol):
   def addForeverTarget(self, func: Callable[["Mirai"], Any]):
     self.run_forever_target.append(func)
 
+  async def checkWebsocket(self, force=False):
+    if self.useWebsocket:
+      if not (await self.getConfig())["enableWebsocket"]:
+        if not force:
+          raise ValueError("websocket is disabled.")
+        await self.setConfig(enableWebsocket=True)
+      return True
+    else:
+      return False
+
   def run(self, loop=None, no_polling=False, no_forever=False):
     self.checkEventBodyAnnotations()
     self.checkEventDependencies()
@@ -551,6 +566,9 @@ class Mirai(MiraiProtocol):
         loop.create_task(self.message_polling(lambda: exit_signal, queue))
       else:
         SessionLogger.warning("you are using WebSocket, it's a experimental method.")
+        SessionLogger.warning("but, websocket is remember way to fetch message and event,")
+        SessionLogger.warning("and http's fetchMessage is disabled in mirai-api-http 1.2.1(it's a bug :P).")
+        SessionLogger.warning("if it throw a unexpected error, you can call the httpapi's author.")
         loop.create_task(self.ws_event_receiver(lambda: exit_signal, queue))
       loop.create_task(self.event_runner(lambda: exit_signal, queue))
     
