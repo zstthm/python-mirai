@@ -13,6 +13,10 @@ from mirai.event.message.components import (
     Source,
     AtAll,
     Face,
+    Quote,
+    Json as JsonMessage,
+    Xml as XmlMessage,
+    App as LightApp,
     Image
 )
 from mirai.event.message.chain import (
@@ -63,10 +67,10 @@ from mirai.event.external import (
 )
 from mirai.event.external.enums import ExternalEvents
 
-from mirai.friend import (
+from mirai.entities.friend import (
     Friend
 )
-from mirai.group import (
+from mirai.entities.group import (
     Group,
     Member,
     MemberChangeableSetting,
@@ -76,8 +80,5 @@ from mirai.group import (
 
 import mirai.network
 import mirai.protocol
-from mirai.session import (
-    Session
-)
 
 from mirai.application import Mirai
