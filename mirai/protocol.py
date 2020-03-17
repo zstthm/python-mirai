@@ -88,7 +88,7 @@ class MiraiProtocol:
         message: T.Union[
             MessageChain,
             BaseMessageComponent,
-            T.List[BaseMessageComponent],
+            T.List[T.Union[BaseMessageComponent, InternalImage]],
             str
         ]
     ) -> BotMessage:
@@ -107,7 +107,7 @@ class MiraiProtocol:
         message: T.Union[
             MessageChain,
             BaseMessageComponent,
-            T.List[BaseMessageComponent],
+            T.List[T.Union[BaseMessageComponent, InternalImage]],
             str
         ],
         quoteSource: T.Union[int, components.Source]=None
@@ -169,14 +169,8 @@ class MiraiProtocol:
 
     @protocol_log
     @edge_case_handler
-    async def uploadImage(self, type: T.Union[str, ImageType], imagePath: T.Union[Path, str]):
-        if isinstance(imagePath, str):
-            imagePath = Path(imagePath)
-
-        if not imagePath.exists():
-            raise FileNotFoundError("invaild image path.")
-
-        post_result = json.loads(await fetch.upload(f"{self.baseurl}/uploadImage", imagePath, {
+    async def uploadImage(self, type: T.Union[str, ImageType], image: InternalImage):
+        post_result = json.loads(await fetch.upload(f"{self.baseurl}/uploadImage", image.render(), {
             "sessionKey": self.session_key,
             "type": type if isinstance(type, str) else type.value
         }))
@@ -367,7 +361,7 @@ class MiraiProtocol:
         message: T.Union[
             MessageChain,
             BaseMessageComponent,
-            T.List[BaseMessageComponent],
+            T.List[T.Union[BaseMessageComponent, InternalImage]],
             str
         ]):
         if isinstance(message, MessageChain):
@@ -377,7 +371,7 @@ class MiraiProtocol:
         elif isinstance(message, (tuple, list)):
             result = []
             for i in message:
-                if type(i) != InternalImage:
+                if not isinstance(i, InternalImage):
                     result.append(json.loads(i.json()))
                 else:
                     result.append({
@@ -434,7 +428,7 @@ class MiraiProtocol:
                 raiser(ValueError("invaild target as a member obj."))
 
     async def handleInternalImageAsGroup(self, image: InternalImage):
-        return await self.uploadImage("group", image.path)
+        return await self.uploadImage("group", image)
 
     async def handleInternalImageAsFriend(self, image: InternalImage):
-        return await self.uploadImage("friend", image.path)
+        return await self.uploadImage("friend", image)
