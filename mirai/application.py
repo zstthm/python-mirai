@@ -21,7 +21,7 @@ from mirai.event.message.models import (FriendMessage, GroupMessage,
 from mirai.logger import Event as EventLogger
 from mirai.logger import Session as SessionLogger
 from mirai.misc import raiser, TRACEBACKED
-from mirai.network import fetch, session
+from mirai.network import fetch
 from mirai.protocol import MiraiProtocol
 from mirai.exceptions import Cancelled
 
@@ -30,6 +30,11 @@ class Mirai(MiraiProtocol):
     str, List[Callable[[Any], Awaitable]]
   ] = {}
   subroutines: List[Callable] = []
+  lifecycle: Dict[str, List[Callable]] = {
+    "start": [],
+    "end": [],
+    "around": []
+  }
   useWebsocket = False
   listening_exceptions: List[Exception] = []
 
@@ -70,7 +75,7 @@ class Mirai(MiraiProtocol):
       else:
         raise ValueError("invaild url")
     else:
-      if all([host, port, authKey, qq]): 
+      if all([host, port, authKey, qq]):
         self.baseurl = f"http://{host}:{port}"
         self.auth_key = authKey
         self.qq = qq
@@ -99,8 +104,8 @@ class Mirai(MiraiProtocol):
     return self
 
   def receiver(self, event_name,
-      dependencies: List[Depend] = [],
-      use_middlewares: List[Callable] = []
+      dependencies: List[Depend] = None,
+      use_middlewares: List[Callable] = None
     ):
     def receiver_warpper(
       func: Callable[[Union[FriendMessage, GroupMessage], "Session"], Awaitable[Any]]
@@ -110,8 +115,8 @@ class Mirai(MiraiProtocol):
 
       protocol = {
         "func": func,
-        "dependencies": dependencies,
-        "middlewares": use_middlewares
+        "dependencies": dependencies or [],
+        "middlewares": use_middlewares or []
       }
       
       if event_name not in self.event:
@@ -151,14 +156,16 @@ class Mirai(MiraiProtocol):
     }
     return translated_mapping
 
-  def signature_getter(self, func):
+  @staticmethod
+  def signature_getter(func):
     "获取函数的默认值列表"
     return {k: v.default \
       for k, v in dict(inspect.signature(func).parameters).items() \
         if v.default != inspect._empty}
 
-  def signature_checker(self, func):
-    signature_mapping = self.signature_getter(func)
+  @staticmethod
+  def signature_checker(func):
+    signature_mapping = Mirai.signature_getter(func)
     for i in signature_mapping.values():
       if not isinstance(i, Depend):
         raise TypeError("you must use a Depend to patch the default value.")
@@ -616,6 +623,20 @@ class Mirai(MiraiProtocol):
     else:
       return False
 
+  @staticmethod
+  async def run_func(func, *args, **kwargs):
+    if inspect.iscoroutinefunction(func):
+      await func(*args, **kwargs)
+    else:
+      func(*args, **kwargs)
+
+  def onStage(self, stage_name):
+    def warpper(func):
+      self.lifecycle.setdefault(stage_name, [])
+      self.lifecycle[stage_name].append(func)
+      return func
+    return warpper
+
   def run(self, loop=None, no_polling=False, no_forever=False):
     self.checkEventBodyAnnotations()
     self.checkEventDependencies()
@@ -625,17 +646,23 @@ class Mirai(MiraiProtocol):
     exit_signal = False
     loop.run_until_complete(self.enable_session())
     if not no_polling:
-      if not self.useWebsocket:
-        SessionLogger.warning("http's fetchMessage is disabled in mirai-api-http 1.2.1(it's a bug :P).")
-        SessionLogger.warning("so, you can use WebSocket.")
-        SessionLogger.warning("if it throw a unexpected error, you should call the httpapi's author.")
-        loop.create_task(self.message_polling(lambda: exit_signal, queue))
+      # check ws status
+      if self.useWebsocket:
+        SessionLogger.info("event receive method: websocket")
       else:
-        SessionLogger.warning("you are using WebSocket, it's a experimental method.")
-        SessionLogger.warning("but, websocket is remember way to fetch message and event,")
-        SessionLogger.warning("and http's fetchMessage is disabled when websocket is enabled")
-        SessionLogger.warning("if it throw a unexpected error, you can use issues on github.")
-        loop.create_task(self.ws_event_receiver(lambda: exit_signal, queue))
+        SessionLogger.info("event receive method: http polling")
+
+      try:
+        loop.run_until_complete(self.checkWebsocket())
+      except ValueError:
+        # should use http, but we can change it.
+        if self.useWebsocket:
+          loop.create_task(self.ws_event_receiver(lambda: exit_signal, queue))
+        else:
+          # change.
+          SessionLogger.warning("catched wrong config: enableWebsocket=true, we will modify it on launch.")
+          loop.run_until_complete(self.setConfig(enableWebsocket=False))
+          loop.create_task(self.message_polling(lambda: exit_signal, queue))
       loop.create_task(self.event_runner(lambda: exit_signal, queue))
     
     if not no_forever:
@@ -643,9 +670,20 @@ class Mirai(MiraiProtocol):
         loop.create_task(i(self))
 
     try:
+      for start_callable in self.lifecycle['start']:
+        loop.run_until_complete(self.run_func(start_callable, self))
+
+      for around_callable in self.lifecycle['around']:
+        loop.run_until_complete(self.run_func(around_callable, self))
+
       loop.run_forever()
     except KeyboardInterrupt:
       SessionLogger.info("catched Ctrl-C, exiting..")
     finally:
+      for around_callable in self.lifecycle['around']:
+        loop.run_until_complete(self.run_func(around_callable, self))
+
+      for end_callable in self.lifecycle['end']:
+        loop.run_until_complete(self.run_func(end_callable, self))
+
       loop.run_until_complete(self.release())
-      loop.run_until_complete(session.close())
