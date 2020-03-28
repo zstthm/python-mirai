@@ -37,8 +37,10 @@ class Mirai(MiraiProtocol):
   }
   useWebsocket = False
   listening_exceptions: List[Exception] = []
+  extensite_config: Dict
+  global_dependencies: List[Depend]
 
-  def __init__(self, 
+  def __init__(self,
     url: Optional[str] = None,
 
     host: Optional[str] = None,
@@ -46,8 +48,12 @@ class Mirai(MiraiProtocol):
     authKey: Optional[str] = None,
     qq: Optional[int] = None,
 
-    websocket: bool = False
+    websocket: bool = False,
+    extensite_config: dict = None,
+    global_dependencies: List[Depend] = None
   ):
+    self.extensite_config = extensite_config or {}
+    self.global_dependencies = global_dependencies or []
     self.useWebsocket = websocket
     if url:
       urlinfo = parse.urlparse(url)
@@ -118,6 +124,9 @@ class Mirai(MiraiProtocol):
         "dependencies": dependencies or [],
         "middlewares": use_middlewares or []
       }
+
+      protocol['dependencies'] += self.global_dependencies
+      # support for global dependencies
       
       if event_name not in self.event:
         self.event[event_name] = [protocol]
@@ -330,7 +339,6 @@ class Mirai(MiraiProtocol):
 
   async def ws_event_receiver(self, exit_signal, queue):
     from mirai.event.external.enums import ExternalEvents
-    print("?")
     async with aiohttp.ClientSession() as session:
       async with session.ws_connect(
         f"{self.baseurl}/all?sessionKey={self.session_key}"
@@ -614,14 +622,7 @@ class Mirai(MiraiProtocol):
     return func
 
   async def checkWebsocket(self, force=False):
-    if self.useWebsocket:
-      if not (await self.getConfig())["enableWebsocket"]:
-        if not force:
-          raise ValueError("websocket is disabled.")
-        await self.setConfig(enableWebsocket=True)
-      return True
-    else:
-      return False
+    return (await self.getConfig())["enableWebsocket"]
 
   @staticmethod
   async def run_func(func, *args, **kwargs):
@@ -636,6 +637,18 @@ class Mirai(MiraiProtocol):
       self.lifecycle[stage_name].append(func)
       return func
     return warpper
+
+  def include_others(self, *args: List["Mirai"]):
+    for other in args:
+      for event_name, items in other.event.items():
+        if event_name in self.event:
+          self.event[event_name] += items
+        else:
+          self.event[event_name] = items.copy()
+      self.subroutines = other.subroutines
+      for life_name, items in other.lifecycle:
+        self.lifecycle[life_name] += items
+      self.listening_exceptions += other.listening_exceptions
 
   def run(self, loop=None, no_polling=False, no_forever=False):
     self.checkEventBodyAnnotations()
@@ -652,9 +665,8 @@ class Mirai(MiraiProtocol):
       else:
         SessionLogger.info("event receive method: http polling")
 
-      try:
-        loop.run_until_complete(self.checkWebsocket())
-      except ValueError: # we can use http, not ws.
+      result = loop.run_until_complete(self.checkWebsocket())
+      if not result: # we can use http, not ws.
         # should use http, but we can change it.
         if self.useWebsocket:
           SessionLogger.warning("catched wrong config: enableWebsocket=false, we will modify it on launch.")

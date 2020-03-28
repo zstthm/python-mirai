@@ -3,6 +3,8 @@ import typing as T
 from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
+import pydantic
+import traceback
 import json
 
 from mirai.event.message.models import FriendMessage, GroupMessage, BotMessage, MessageTypes
@@ -404,13 +406,18 @@ class MiraiProtocol:
         elif isinstance(message, (tuple, list)):
             result = []
             for i in message:
-                if type(i) != InternalImage:
-                    result.append(json.loads(i.json()))
-                else:
+                if isinstance(i, InternalImage):
                     result.append({
                         "type": "Image",
-                        "imageId": (await self.handleInternalImageAsFriend(i)).asFriendImage()
+                        "imageId": (await self.handleInternalImageAsGroup(i)).asFriendImage()
                     })
+                elif isinstance(i, components.Image):
+                    result.append({
+                        "type": "Image",
+                        "imageId": i.asGroupImage()
+                    })
+                else:
+                    result.append(json.loads(i.json()))
             return result
         elif isinstance(message, str):
             return [json.loads(components.Plain(text=message).json())]
