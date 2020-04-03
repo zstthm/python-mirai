@@ -13,7 +13,7 @@ aiohttp = "*"
 pydantic = "*"
 pillow = "*"
 logbook = "*"
-parse = "*"
+async_lru = "*"
 
 [requires]
 python_version = "3.8"

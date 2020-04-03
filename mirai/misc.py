@@ -1,14 +1,19 @@
-from enum import Enum
 import asyncio
-from threading import Thread, Lock
-import typing as T
-import random
-from .logger import Protocol, Session
+import inspect
 import os
+import random
 import re
-import aiohttp
-from . import exceptions
 import traceback
+import typing as T
+from collections import namedtuple
+from enum import Enum
+from threading import Lock, Thread
+
+import aiohttp
+
+from . import exceptions
+from .logger import Protocol, Session
+
 
 def assertOperatorSuccess(result, raise_exception=False, return_as_is=False):
   if not result:
@@ -50,6 +55,8 @@ def assertOperatorSuccess(result, raise_exception=False, return_as_is=False):
 class ImageType(Enum):
   Friend = "friend"
   Group = "group"
+
+Parameter = namedtuple("Parameter", ["name", "annotation", "default"])
 
 TRACEBACKED = os.urandom(32)
 
@@ -164,6 +171,19 @@ def edge_case_handler(func):
   wrapper.__name__ = func.__name__
   return wrapper
 
+def throw_error_if_not_enable(func):
+  def wrapper(self, *args, **kwargs):
+    if not self.enabled:
+      raise exceptions.NonEnabledError(
+        f"you mustn't use any methods in MiraiProtocol...,\
+      if you want to access '{func.__name__}' before `app.run()`\
+      , use 'Subroutine'."
+      )
+    return func(self, *args, **kwargs)
+  wrapper.__name__ = func.__name__
+  wrapper.__annotations__ = func.__annotations__
+  return wrapper
+
 def if_error_print_arg(func):
   def wrapper(*args, **kwargs):
     try:
@@ -172,3 +192,13 @@ def if_error_print_arg(func):
       print(args, kwargs)
       traceback.print_exc()
   return wrapper
+
+def argument_signature(callable_target) -> T.List[Parameter]:
+    return [
+        Parameter(
+            name=name,
+            annotation=param.annotation if param.annotation != inspect._empty else None,
+            default=param.default if param.default != inspect._empty else None
+        )
+        for name, param in dict(inspect.signature(callable_target).parameters).items()
+    ]
