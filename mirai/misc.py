@@ -26,6 +26,7 @@ def assertOperatorSuccess(result, raise_exception=False, return_as_is=False):
       return result['code'] == 0
     else:
       if result['code'] != 0:
+        print(result)
         raise {
           1: exceptions.AuthenticateError, # 这种情况需要检查Authkey, 可能还是连错了.
           2: exceptions.LoginException, # 嗯...你是不是忘记在mirai-console登录了?...算了 自动重连.
@@ -33,6 +34,8 @@ def assertOperatorSuccess(result, raise_exception=False, return_as_is=False):
           4: exceptions.ValidatedSession, # 啊 smjb错误... 也会自动重连
           5: exceptions.UnknownReceiverTarget, # 业务代码错误.
           10: PermissionError, # 一般业务代码错误, 自行亦会
+          20: exceptions.BotMutedError, # 机器人被禁言
+          30: exceptions.TooLargeMessageError,
           400: exceptions.CallDevelopers # 发生这个错误...你就给我提个ISSUE
         }[result['code']](f"""invaild stdin: { {
           1: "wrong auth key",
@@ -41,6 +44,8 @@ def assertOperatorSuccess(result, raise_exception=False, return_as_is=False):
           4: "disabled session key",
           5: "unknown receiver target",
           10: "permission denied",
+          20: "bot account has been muted",
+          30: "mirai backend cannot deal with so large message",
           400: "wrong arguments"
         }[result['code']] }""")
       else:
@@ -144,7 +149,9 @@ def secure_filename(filename):
 
 def edge_case_handler(func):
   async def wrapper(self, *args, **kwargs):
-    while True:
+    retry_times = 0
+    while retry_times <= 5:
+      retry_times += 1
       try:
         return await func(self, *args, **kwargs)
       except exceptions.AuthenticateError:
@@ -168,6 +175,8 @@ def edge_case_handler(func):
         exit(-1)
       except:
         raise
+    else:
+      Protocol.error("we retried many times, but it doesn't send a success message to us...")
   wrapper.__name__ = func.__name__
   return wrapper
 

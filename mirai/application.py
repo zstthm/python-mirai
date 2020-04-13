@@ -18,10 +18,15 @@ from mirai.entities.friend import Friend
 from mirai.entities.group import Group, Member
 from mirai.event import ExternalEvent, ExternalEventTypes, InternalEvent
 from mirai.event.message import MessageChain, components
-from mirai.event.message.models import (FriendMessage, GroupMessage,
-                                        MessageItemType, MessageTypes)
-from mirai.logger import Event as EventLogger
-from mirai.logger import Session as SessionLogger
+from mirai.event.message.models import (
+  FriendMessage, GroupMessage, TempMessage,
+  MessageItemType, MessageTypes
+)
+from mirai.logger import (
+  Event as EventLogger,
+  Session as SessionLogger,
+  Network as NetworkLogger
+)
 from mirai.misc import argument_signature, raiser, TRACEBACKED, printer
 from mirai.network import fetch
 from mirai.protocol import MiraiProtocol
@@ -84,7 +89,7 @@ class Mirai(MiraiProtocol):
 
           self.baseurl = f"http://{urlinfo.netloc}"
           self.auth_key = authKey
-          self.qq = query_info["qq"][0]
+          self.qq =  int(query_info["qq"][0])
         else:
           raise ValueError("invaild url: wrong format")
       else:
@@ -93,7 +98,7 @@ class Mirai(MiraiProtocol):
       if all([host, port, authKey, qq]):
         self.baseurl = f"http://{host}:{port}"
         self.auth_key = authKey
-        self.qq = qq
+        self.qq = int(qq)
       else:
         raise ValueError("invaild arguments")
 
@@ -175,6 +180,7 @@ class Mirai(MiraiProtocol):
           except TypeError:
             continue
           if received_data:
+            NetworkLogger.debug("received", received_data)
             try:
               received_data['messageChain'] = MessageChain.parse_obj(received_data['messageChain'])
               received_data = MessageTypes[received_data['type']].parse_obj(received_data)
@@ -375,7 +381,8 @@ class Mirai(MiraiProtocol):
           CallParams[name] = PlaceAnnotation[annotation](event_context)
           continue
         else:
-          raise RuntimeError(f"checked a unexpected annotation: {annotation}")
+          if name not in extra_parameter:
+            raise RuntimeError(f"checked a unexpected annotation: {annotation}")
     
     try:
       async with AsyncExitStack() as stack:
@@ -385,7 +392,7 @@ class Mirai(MiraiProtocol):
         for normal_middleware in sorted_middlewares['normal']:
           stack.enter_context(normal_middleware)
 
-        return await self.run_func(executor_protocol.callable, **CallParams)
+        return await self.run_func(executor_protocol.callable, **CallParams, **extra_parameter)
     except exceptions.Cancelled:
       return TRACEBACKED
     except Exception as e:
@@ -397,12 +404,13 @@ class Mirai(MiraiProtocol):
     return {
       Mirai: lambda k: True,
       GroupMessage: lambda k: k.__class__.__name__ == "GroupMessage",
-      FriendMessage: lambda k: k.__class__.__name__ =="FriendMessage",
+      FriendMessage: lambda k: k.__class__.__name__ == "FriendMessage",
+      TempMessage: lambda k: k.__class__.__name__ == "TempMessage",
       MessageChain: lambda k: k.__class__.__name__ in MessageTypes,
       components.Source: lambda k: k.__class__.__name__ in MessageTypes,
-      Group: lambda k: k.__class__.__name__ == "GroupMessage",
+      Group: lambda k: k.__class__.__name__ in ["GroupMessage", "TempMessage"],
       Friend: lambda k: k.__class__.__name__ =="FriendMessage",
-      Member: lambda k: k.__class__.__name__ == "GroupMessage",
+      Member: lambda k: k.__class__.__name__ in ["GroupMessage", "TempMessage"],
       "Sender": lambda k: k.__class__.__name__ in MessageTypes,
       "Type": lambda k: k.__class__.__name__,
       **({
@@ -514,6 +522,9 @@ class Mirai(MiraiProtocol):
       FriendMessage: lambda k: k.body \
         if self.getEventCurrentName(k.body) == "FriendMessage" else\
           raiser(ValueError("you cannot setting a unbind argument.")),
+      TempMessage: lambda k: k.body \
+        if self.getEventCurrentName(k.body) == "TempMessage" else\
+          raiser(ValueError("you cannot setting a unbind argument.")),
       MessageChain: lambda k: k.body.messageChain\
         if self.getEventCurrentName(k.body) in MessageTypes else\
           raiser(ValueError("MessageChain is not enable in this type of event.")),
@@ -521,13 +532,13 @@ class Mirai(MiraiProtocol):
         if self.getEventCurrentName(k.body) in MessageTypes else\
           raiser(TypeError("Source is not enable in this type of event.")),
       Group: lambda k: k.body.sender.group\
-        if self.getEventCurrentName(k.body) == "GroupMessage" else\
+        if self.getEventCurrentName(k.body) in ["GroupMessage", "TempMessage"] else\
           raiser(ValueError("Group is not enable in this type of event.")),
       Friend: lambda k: k.body.sender\
         if self.getEventCurrentName(k.body) == "FriendMessage" else\
           raiser(ValueError("Friend is not enable in this type of event.")),
       Member: lambda k: k.body.sender\
-        if self.getEventCurrentName(k.body) == "GroupMessage" else\
+        if self.getEventCurrentName(k.body) in ["GroupMessage", "TempMessage"] else\
           raiser(ValueError("Group is not enable in this type of event.")),
       "Sender": lambda k: k.body.sender\
         if self.getEventCurrentName(k.body) in MessageTypes else\
@@ -544,12 +555,14 @@ class Mirai(MiraiProtocol):
     elif isinstance(event_value, ( # normal class
       UnexpectedException,
       GroupMessage,
-      FriendMessage
+      FriendMessage,
+      TempMessage
     )):
       return event_value.__class__.__name__
     elif event_value in [ # message
       GroupMessage,
-      FriendMessage
+      FriendMessage,
+      TempMessage
     ]:
       return event_value.__name__
     elif isinstance(event_value, ( # enum
@@ -607,6 +620,7 @@ class Mirai(MiraiProtocol):
           self.event[event_name] = items.copy()
       self.subroutines = other.subroutines
       for life_name, items in other.lifecycle:
+        self.lifecycle.setdefault(life_name, [])
         self.lifecycle[life_name] += items
       self.listening_exceptions += other.listening_exceptions
 
