@@ -17,7 +17,8 @@ from mirai.event.message.components import (
     Json as JsonMessage,
     Xml as XmlMessage,
     App as LightApp,
-    Image
+    Image,
+    FlashImage
 )
 from mirai.event.message.chain import (
     MessageChain
@@ -64,9 +65,15 @@ from mirai.event.external import (
     MemberSpecialTitleChangeEvent,
     MemberPermissionChangeEvent,
     MemberMuteEvent,
-    MemberUnmuteEvent
-)
+    MemberUnmuteEvent,
 
+    NewFriendRequestEvent,
+    MemberJoinRequestEvent
+)
+from mirai.event.enums import (
+    NewFriendRequestResponseOperate as NewFriendRequestResp,
+    MemberJoinRequestResponseOperate as MemberJoinRequestResp
+)
 
 from mirai.entities.friend import (
     Friend
