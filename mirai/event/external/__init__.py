@@ -156,6 +156,6 @@ class MemberJoinRequestEvent(ExternalEvent):
     type: EventType = EventType.MemberJoinRequestEvent
     requestId: int = Field(..., alias="eventId")
     supplicant: int = Field(..., alias="fromId") # 即请求方 QQ
-    groupId: T.Optional[int] = Field(..., alias="groupId")
+    sourceGroup: T.Optional[int] = Field(..., alias="groupId")
     groupName: str = Field(..., alias="groupName")
     nickname: str = Field(..., alias="nick")
