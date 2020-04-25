@@ -126,7 +126,7 @@ class Image(BaseMessageComponent):
         return f"[Image::{self.imageId}]"
 
     def asGroupImage(self) -> str:
-        return f"{{{self.imageId.upper()}}}.jpg"
+        return self.imageId
 
     def asFriendImage(self) -> str:
         return f"/{self.imageId.lower()}"
