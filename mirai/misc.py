@@ -66,7 +66,7 @@ Parameter = namedtuple("Parameter", ["name", "annotation", "default"])
 TRACEBACKED = os.urandom(32)
 
 ImageRegex = {
-  "group": r"(?<=\{)([0-9A-Z]{8})\-([0-9A-Z]{4})-([0-9A-Z]{4})-([0-9A-Z]{4})-([0-9A-Z]{12})(?=\}\..*?)",
+  "group": r"({(?<=\{)([0-9A-Z]{8})\-([0-9A-Z]{4})-([0-9A-Z]{4})-([0-9A-Z]{4})-([0-9A-Z]{12})(?=\})}\..{5}",
   "friend": r"(?<=/)([0-9a-z]{8})\-([0-9a-z]{4})-([0-9a-z]{4})-([0-9a-z]{4})-([0-9a-z]{12})"
 }
 
