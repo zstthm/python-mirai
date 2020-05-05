@@ -435,7 +435,7 @@ class MiraiProtocol:
     @throw_error_if_not_enable
     @protocol_log
     @edge_case_handler
-    async def quit(self,
+    async def quitGroup(self,
         group: T.Union[Group, int]
     ):
         return assertOperatorSuccess(
