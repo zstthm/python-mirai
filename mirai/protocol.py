@@ -435,6 +435,19 @@ class MiraiProtocol:
     @throw_error_if_not_enable
     @protocol_log
     @edge_case_handler
+    async def quitGroup(self,
+        group: T.Union[Group, int]
+    ):
+        return assertOperatorSuccess(
+            await fetch.http_post(f"{self.baseurl}/quit", {
+                "sessionKey": self.session_key,
+                "target": self.handleTargetAsGroup(group)
+            }
+        ), raise_exception=True) 
+      
+    @throw_error_if_not_enable
+    @protocol_log
+    @edge_case_handler
     async def respondRequest(self,
         request: T.Union[
             eem.NewFriendRequestEvent,

@@ -111,9 +111,9 @@ class Image(BaseMessageComponent):
     @classmethod
     def imageId_formater(cls, v):
         length = len(v)
-        if length == 42:
+        if length == 44:
             # group
-            return v[1:-5]
+            return v[1:-7]
         elif length == 37:
             return v[1:]
         else:
@@ -126,7 +126,7 @@ class Image(BaseMessageComponent):
         return f"[Image::{self.imageId}]"
 
     def asGroupImage(self) -> str:
-        return f"{{{self.imageId.upper()}}}.jpg"
+        return f"{{{self.imageId}}}.mirai"
 
     def asFriendImage(self) -> str:
         return f"/{self.imageId.lower()}"

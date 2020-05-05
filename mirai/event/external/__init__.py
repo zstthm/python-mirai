@@ -65,7 +65,7 @@ class GroupNameChangeEvent(ExternalEvent):
     origin: str
     current: str
     group: Group
-    isByBot: bool
+    operator: T.Optional[Member]
 
 class GroupEntranceAnnouncementChangeEvent(ExternalEvent):
     type: EventType = EventType.GroupEntranceAnnouncementChangeEvent
@@ -144,6 +144,14 @@ class MemberUnmuteEvent(ExternalEvent):
     type: EventType = EventType.MemberUnmuteEvent
     member: Member
     operator: T.Optional[Member]
+
+class BotLeaveEventActive(ExternalEvent):
+    type: EventType = EventType.BotLeaveEventActive
+    group: Group
+
+class BotLeaveEventKick(ExternalEvent):
+    type: EventType = EventType.BotLeaveEventKick
+    group: Group
 
 class NewFriendRequestEvent(ExternalEvent):
     type: EventType = EventType.NewFriendRequestEvent
