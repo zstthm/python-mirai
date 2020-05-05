@@ -5,11 +5,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="kuriyama",
-    version='0.3.2',
+    version='0.3.3',
     description='A framework for OICQ(QQ, made by Tencent) headless client "Mirai".',
     author='Chenwe-i-lin',
     author_email="Chenwe_i_lin@outlook.com",
-    url="https://github.com/Chenwe-i-lin/python-mirai",
+    url="https://github.com/NatriumLab/python-mirai",
     packages=find_packages(include=("mirai", "mirai.*")),
     python_requires='>=3.7',
     keywords=["oicq qq qqbot", ],
