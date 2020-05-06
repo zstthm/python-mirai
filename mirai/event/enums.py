@@ -10,6 +10,8 @@ class ExternalEventTypes(Enum):
     BotMuteEvent = "BotMuteEvent"
     BotUnmuteEvent = "BotUnmuteEvent"
     BotJoinGroupEvent = "BotJoinGroupEvent"
+    BotLeaveEventActive = "BotLeaveEventActive"
+    BotLeaveEventKick = "BotLeaveEventKick"
 
     GroupRecallEvent = "GroupRecallEvent"
     FriendRecallEvent = "FriendRecallEvent"
