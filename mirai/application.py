@@ -128,6 +128,7 @@ class Mirai(MiraiProtocol):
       dependencies: List[Depend] = None,
       use_middlewares: List[Callable] = None
     ):
+    event_name = self.getEventCurrentName(event_name)
     def receiver_warpper(func: Callable):
       if not inspect.iscoroutinefunction(func):
         raise TypeError("event body must be a coroutine function.")
