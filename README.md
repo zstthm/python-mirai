@@ -1,5 +1,8 @@
 ## Mirai Framework for Python
 
+**作为存放 python-mirai v3 版本的本仓库已经不再维护, 若需查看 v4 的开发进度, 请参阅** [Graia Project](https://github.com/GraiaProject) **处获取 v4 版本的最新开发状态**
+**顺便, v4 版本的 python-mirai, 正式名字称为 `Graia Framework`**
+
 ### 这是什么?
 以 OICQ(QQ) 协议驱动的高性能机器人开发框架 [Mirai](https://github.com/mamoe/mirai) 的 Python 接口, 通过其提供的 `HTTP API` 与无头客户端(`Mirai`)交互.
 
